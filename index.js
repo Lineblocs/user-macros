@@ -48,7 +48,7 @@ var vmContext = createVMContext();
 console.log("running code");
 setImmediate(async () => {
     let data = 'c3RhY2thYnVzZS5jb20=';
-    let buff = new Buffer(data, 'base64');
+    let buff = Buffer.from(data, 'base64');
     let text = buff.toString('ascii');
     var code = "var x = 1; console.log('111');";
     const script = new vm.Script(code);
