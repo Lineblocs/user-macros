@@ -1,4 +1,8 @@
 {
     "name": "lineblocs-k8s-runnable",
-    "version": "v0.0.1"
+    "version": "v0.0.1",
+    "dependencies": {
+        "lineblocs-sdk": "0.0.1-alpha",
+        "uuid": "^8.3.2"
+    }
 }

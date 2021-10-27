@@ -1,5 +1,8 @@
 const vm = require('vm');
 const util = require('util');
+const uuid = require("uuid");
+const sdk = require('lineblocs-sdk');
+const Channel = require('lineblocs-sdk/models/channel');
 
 function vmLog(tag) {
   var args = arguments;
@@ -15,6 +18,30 @@ function vmLog(tag) {
   }
 }
 
+function buildContext() {
+    var channelId = process.env['CHANNEL_ID']||'';
+    var channel = new Channel( channelId );
+    return {
+        channel: channel,
+        getSDK: function() {
+            var clientId = uuid.v4();
+            var token = process.env['LINEBLOCS_TOKEN']||'';
+            var secret = process.env['LINEBLOCS_SECRET']||'';
+            var workspace  = process.env['LINEBLOCS_WORKSPACE_ID']||'1';
+            var user  = process.env['LINEBLOCS_USER_ID']||'1';
+            var domain = process.env['LINEBLOCS_DOMAIN']||'workspace.lineblocs.com';
+            var connectArgs = {
+                token: token,
+                secret: secret,
+                clientid: clientId,
+                workspaceid: workspace,
+                userid: user,
+                domain: domain
+            }
+            return sdk( connectArgs );
+        }
+    };
+}
 function createVMContext() {
     const vmConsole = {
         log: function(...args) {
@@ -28,7 +55,7 @@ function createVMContext() {
         },
     };
 
-    var ctx = {console: vmConsole};
+    var ctx = {console: vmConsole, context: buildContext()};
     var context =  vm.createContext({
         ...ctx,
         __filename: "",
@@ -47,10 +74,27 @@ console.log("creating VM context...");
 var vmContext = createVMContext();
 console.log("running code");
 setImmediate(async () => {
-    let data = 'c3RhY2thYnVzZS5jb20=';
-    let buff = Buffer.from(data, 'base64');
-    let text = buff.toString('ascii');
-    var code = "var x = 1; console.log('111');";
+    let b64 = process.env['SCRIPT_B64']||'';
+    let buff = Buffer.from(b64, 'base64');
+    //let code = buff.toString('ascii');
+    let code = `module.exports = async function(event, context) {
+        console.log( event );
+        var sdk = context.getSDK();
+        /*
+        var bridge = await sdk.createBridge();
+        console.log("BRIDGE ID = " + bridge.bridge_id);
+        bridge.on('BridgeCreated', async function(bridge) {
+            console.log("bridge created..");
+        });
+        */
+        var conf = await sdk.createConference("Test");
+    }`;
+
+    console.log(code);
+    //var code = "var x = 1; console.log('111');";
     const script = new vm.Script(code);
-    script.runInContext(vmContext);
+    var event = JSON.parse( process.env['PARAMS'] || '{}');
+    var context =buildContext();
+    var promise = script.runInContext(vmContext)( event, context );
+    await promise;
 });
