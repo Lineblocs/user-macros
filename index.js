@@ -17,28 +17,31 @@ function vmLog(tag) {
     console.log("User VM script " + tag + ": " +  loggable1 + " " + loggable2);
   }
 }
-
+function createSDKUsingEnvironment() {
+    var clientId = uuid.v4();
+    var token = process.env['LINEBLOCS_TOKEN']||'';
+    var secret = process.env['LINEBLOCS_SECRET']||'';
+    var workspace  = process.env['LINEBLOCS_WORKSPACE_ID']||'1';
+    var user  = process.env['LINEBLOCS_USER_ID']||'1';
+    var domain = process.env['LINEBLOCS_DOMAIN']||'workspace.lineblocs.com';
+    var connectArgs = {
+        token: token,
+        secret: secret,
+        clientid: clientId,
+        workspaceid: workspace,
+        userid: user,
+        domain: domain
+    }
+    return sdk( connectArgs );
+}
 function buildContext() {
     var channelId = process.env['CHANNEL_ID']||'';
-    var channel = new Channel( channelId );
+    var sdk = createSDKUsingEnvironment();
+    var channel = new Channel( sdk, channelId );
     return {
         channel: channel,
         getSDK: function() {
-            var clientId = uuid.v4();
-            var token = process.env['LINEBLOCS_TOKEN']||'';
-            var secret = process.env['LINEBLOCS_SECRET']||'';
-            var workspace  = process.env['LINEBLOCS_WORKSPACE_ID']||'1';
-            var user  = process.env['LINEBLOCS_USER_ID']||'1';
-            var domain = process.env['LINEBLOCS_DOMAIN']||'workspace.lineblocs.com';
-            var connectArgs = {
-                token: token,
-                secret: secret,
-                clientid: clientId,
-                workspaceid: workspace,
-                userid: user,
-                domain: domain
-            }
-            return sdk( connectArgs );
+            return sdk;
         }
     };
 }
@@ -87,7 +90,6 @@ setImmediate(async () => {
             console.log("ringing now..");
             await channel.startRinging();
         });
-        /*
     }`;
 
     console.log(code);
