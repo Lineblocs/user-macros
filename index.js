@@ -80,14 +80,14 @@ setImmediate(async () => {
     let code = `module.exports = async function(event, context) {
         console.log( event );
         var sdk = context.getSDK();
-        /*
-        var bridge = await sdk.createBridge();
-        console.log("BRIDGE ID = " + bridge.bridge_id);
-        bridge.on('BridgeCreated', async function(bridge) {
-            console.log("bridge created..");
+        var channel = context.channel;
+        var playback = await context.channel.playTTS({text: "Hello how are you ??"});
+        playback.on("Finished", async function() {
+            console.log("Voice completed..");
+            console.log("ringing now..");
+            await channel.startRinging();
         });
-        */
-        var conf = await sdk.createConference("Test");
+        /*
     }`;
 
     console.log(code);
