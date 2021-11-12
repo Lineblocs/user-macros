@@ -1,8 +1,35 @@
+var PROTO_PATH = __dirname + '/router.proto';
+var grpc = require('@grpc/grpc-js');
+var protoLoader = require('@grpc/proto-loader');
 const vm = require('vm');
 const util = require('util');
 const uuid = require("uuid");
+var request = require("request-promise");
 const sdk = require('lineblocs-sdk');
 const Channel = require('lineblocs-sdk/models/channel');
+const Cell = require('lineblocs-sdk/models/cell');
+const Flow = require('lineblocs-sdk/models/flow');
+
+var BASE_URL='https://internals.lineblocs.com'
+
+// Suggested options for similarity to existing grpc.load behavior
+var packageDefinition = protoLoader.loadSync(
+    PROTO_PATH,
+    {keepCase: true,
+     longs: String,
+     enums: String,
+     defaults: true,
+     oneofs: true
+    });
+var protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
+var router = protoDescriptor.router
+
+var includeHeaders = function (body, response, resolveWithFullResponse) {
+	return {
+		'headers': response.headers,
+		'data': body
+	};
+};
 
 function vmLog(tag) {
   var args = arguments;
@@ -34,18 +61,29 @@ function createSDKUsingEnvironment() {
     }
     return sdk( connectArgs );
 }
-function buildContext() {
-    var channelId = process.env['CHANNEL_ID']||'';
+function buildContext(params) {
+    console.log("params ", params)
+    var channelId = params['channel_id']
+    var flowId = params['channel_id']
+    var cellId = params['cell_id']
+    var cellName = params['cell_name']
     var sdk = createSDKUsingEnvironment();
     var channel = new Channel( sdk, channelId );
+    var flow = new Flow( sdk, flowId );
+    var cell = new Cell( sdk, cellId, cellName );
     return {
-        channel: channel,
+        channel,
+        lineChannel: channel,
+        flow,
+        lineFlow: flow,
+        cell,
+        lineCell: cell,
         getSDK: function() {
             return sdk;
         }
     };
 }
-function createVMContext() {
+function createVMContext(params) {
     const vmConsole = {
         log: function(...args) {
             vmLog("console.log", ...args);
@@ -58,7 +96,7 @@ function createVMContext() {
         },
     };
 
-    var ctx = {console: vmConsole, context: buildContext()};
+    var ctx = {console: vmConsole, context: buildContext(params)};
     var context =  vm.createContext({
         ...ctx,
         __filename: "",
@@ -73,30 +111,79 @@ function createVMContext() {
     return context;
 }
 
-console.log("creating VM context...");
-var vmContext = createVMContext();
-console.log("running code");
-setImmediate(async () => {
-    let b64 = process.env['SCRIPT_B64']||'';
-    let buff = Buffer.from(b64, 'base64');
-    //let code = buff.toString('ascii');
-    let code = `module.exports = async function(event, context) {
-        console.log( event );
-        var sdk = context.getSDK();
-        var channel = context.channel;
-        var playback = await context.channel.playTTS({text: "Hello how are you ??"});
-        playback.on("Finished", async function() {
-            console.log("Voice completed..");
-            console.log("ringing now..");
-            await channel.startRinging();
-        });
-    }`;
+async function safeAPICall(opts) {
+	return new Promise( async function(resolve, reject) {
+		try {
+			var result = await request(opts);
+			resolve( result );
+		} catch (err) {
+			reject("API error: " + err);
+			//reject("API error");
+			return;
+		}
+	});
+}
 
-    console.log(code);
+async function getWorkspaceMacros(workspace) {
+	var params = {};
+	var url = BASE_URL + '/user/getWorkspaceMacros?workspace='+workspace;
+	//params['workpace'] =workspace;
+	var options = {
+		uri: url,
+		qs: params,
+		headers: {},
+		json: true // Automatically parses the JSON string in the response
+	};
+	return safeAPICall(options);
+}
+
+
+
+async function main() {
+  console.log("starting server..")
+  var workspace  = process.env['LINEBLOCS_WORKSPACE_ID']||'27';
+  var macros = await getWorkspaceMacros(workspace)
+  console.log("got macros ", macros)
+  var server = new grpc.Server();
+
+  function callMacro(call, callback) {
+    var request = call.request;
+    var name = request.name;
+    // get handler for this function
+    var foundObj;
+    for ( var index in macros ) {
+        var functionObj = macros[ index ];
+        if ( functionObj.title === name ) {
+            foundObj = functionObj;
+        }
+    }
+    if ( !foundObj ) {
+        callback(null, {error: true, msg: 'could not find handler'})
+        return
+    }
     //var code = "var x = 1; console.log('111');";
-    const script = new vm.Script(code);
-    var event = JSON.parse( process.env['PARAMS'] || '{}');
-    var context =buildContext();
-    var promise = script.runInContext(vmContext)( event, context );
-    await promise;
-});
+    const script = new vm.Script(foundObj.compiled_code);
+    //var event = JSON.parse( process.env['PARAMS'] || '{}');
+    var event = request.event;
+    var context =buildContext(event);
+    console.log("received event..", event);
+    console.log("running macro: " + name)
+
+var vmContext = createVMContext(event);
+    script.runInContext(vmContext)( event, context ).then(function(result) {
+        callback(null, {error: false, result:result})
+    })
+  }
+
+  server.addService(router.LineblocsWorspaceSvc.service, {callMacro: callMacro})
+  console.log("added svc")
+  server.bindAsync('0.0.0.0:10000', grpc.ServerCredentials.createInsecure(), () => {
+    console.log('running server..')
+    server.start();
+  });
+  return Promise.resolve()
+}
+
+setImmediate(async () => {
+    await main();
+})
